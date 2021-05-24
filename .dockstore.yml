@@ -1,0 +1,5 @@
+version: 1.2
+workflows:
+   - name: WasteWaterVariantCalling
+     subclass: WDL
+     primaryDescriptorPath: WasteWaterVariantCalling/WasteWaterVariantCalling.wdl
