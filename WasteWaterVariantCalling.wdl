@@ -45,11 +45,13 @@ workflow WasteWaterVariantCalling {
                 tsv = vcf2tsv.sample_spike_tsv,
                 sample_id = id_bam.left,
                 spike_bed = spike_bed,
+                spike_annotations = spike_annotations
         }
     }
     call merge_tsv {
         input:
             tsv = reformat_tsv.sample_spike_tsv_summary,
+            tsv_dash = reformat_tsv.sample_spike_tsv_dash,
             spike_annotations = spike_annotations
     }
     
@@ -70,9 +72,10 @@ workflow WasteWaterVariantCalling {
             spike_mutations = get_spike.spike_mutations,
             sample_spike_vcf = sample_spike.sample_spike_vcf,
             sample_spike_tsv = vcf2tsv.sample_spike_tsv,
-            sample_spike_tsv_reformatted = reformat_tsv.sample_spike_tsv_reformatted,
             sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary,
+            sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash,
             spike_summary = merge_tsv.spike_summary,
+            spike_dashboard = merge_tsv.spike_dashboard,
             out_dir = out_dir
     }
     
@@ -82,10 +85,11 @@ workflow WasteWaterVariantCalling {
         Array[File] sorted_vcf = sort_vcf.sorted_vcf
         Array[File] sample_spike_vcf = sample_spike.sample_spike_vcf
         Array[File] sample_spike_tsv = vcf2tsv.sample_spike_tsv
-        Array[File] sample_spike_tsv_reformatted = reformat_tsv.sample_spike_tsv_reformatted
         Array[File] sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary
+        Array[File] sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash
         File merged_vcf = merge_vcfs.merged_vcf
         File spike_summary = merge_tsv.spike_summary
+        File spike_dashboard = merge_tsv.spike_dashboard
         File spike_mutations = get_spike.spike_mutations
         String transfer_date = transfer_outputs.transfer_date
     }
@@ -125,7 +129,7 @@ task variant_calling {
 
     command <<<
         
-        freebayes -f ~{ref} --haplotype-length 0 --min-alternate-count 3 --min-alternate-fraction 0.05 --min-mapping-quality 20 --min-base-quality 20 --min-coverage 10 --use-duplicate-reads --report-monomorphic --pooled-continuous ~{bam} > ~{sample_id}_variants.vcf
+        freebayes -f ~{ref} --haplotype-length 0 --min-alternate-count 3 --min-alternate-fraction 0.05 --min-mapping-quality 20 --min-base-quality 20 --min-coverage 10 --use-duplicate-reads --report-monomorphic --pooled-continuous -n 1 ~{bam} > ~{sample_id}_variants.vcf
         
     >>>
 
@@ -231,6 +235,7 @@ task reformat_tsv {
         File tsv
         String sample_id
         File spike_bed
+        File spike_annotations
     }
 
     command <<<
@@ -241,19 +246,38 @@ task reformat_tsv {
         
         sed 's/\t/_/' "~{sample_id}_spike_mutations_headers.tsv" | sort -t $'\t' -k1,1 > "~{sample_id}_spike_mutations_headers_temp.tsv"
         
-        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "1.1,2.2,2.3,2.4,2.5,2.6" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_reformatted.tsv"
+        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "2.3,2.6,2.4" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
         
-        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "2.3,2.5,2.6" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
+        awk '{$4 = $2 / $3}1' ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_temp3.tsv
         
-        echo -e "~{sample_id}_ALT\t~{sample_id}_RO\t~{sample_id}_AO" | cat - ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
-        ### have a join that is for the bioinf/seq team with all info
-        ### then have a join command with only the columns for ww epi
+        awk 'NF=NF+1{$NF="~{sample_id}"}1'  ~{sample_id}_spike_mutations_temp3.tsv >  ~{sample_id}_spike_mutations_temp4.tsv
+        
+        echo -e "~{sample_id}_ALT ~{sample_id}_AO ~{sample_id}_DP ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp4.tsv > ~{sample_id}_spike_mutations_temp5.tsv
+        
+        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp5.tsv > ~{sample_id}_spike_mutations_temp6.tsv
+        
+        awk '$4 == "-nan" {$4="NA"} 1' OFS="\t" ~{sample_id}_spike_mutations_temp6.tsv > ~{sample_id}_spike_mutations_temp7.tsv
+        
+        cut -f1,4 ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
+        
+        awk '{print $5 "\t" $1 "\t" $4}' ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_temp8.tsv
+        
+        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp8.tsv > ~{sample_id}_spike_mutations_temp9.tsv
+        
+        awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' ~{sample_id}_spike_mutations_temp9.tsv > ~{sample_id}_spike_mutations_temp10.tsv
+        
+        awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' ~{sample_id}_spike_mutations_temp10.tsv > ~{sample_id}_spike_mutations_fordash.tsv
+        
+        ### change counts to alt frequency - done
+        ### For epis, need to add a column with sample name all the way down - done
+        ### transpose tables for bioinf
+        ### cat the long way for epis - done
     
     >>>
 
     output {
-         File sample_spike_tsv_reformatted = "${sample_id}_spike_mutations_reformatted.tsv"
          File sample_spike_tsv_summary = "${sample_id}_spike_mutations_forsummary.tsv"
+         File sample_spike_tsv_dash = "${sample_id}_spike_mutations_fordash.tsv"
     }
 
     runtime {
@@ -267,17 +291,26 @@ task reformat_tsv {
 task merge_tsv {
     input {
         Array[File] tsv
+        Array[File] tsv_dash
         File spike_annotations
     }
 
     command <<<
         
-        paste ~{spike_annotations} ~{sep=' ' tsv} > spike_mutations_summary.tsv
+        awk 'FNR==1 && NR!=1{next;}{print}' ~{sep=' ' tsv_dash} >> spike_mutations_dashboard.tsv
+        ### echo -e "sample_id\tAA_change\tNucl_change\tLineages\tALT\tALTfreq" | cat - spike_mutations_dashboard_temp.tsv > spike_mutations_dashboard.tsv
+        
+        sed 's/ /\t/g' ~{spike_annotations} > spike_annotations.tsv
+        paste spike_annotations.tsv ~{sep=' ' tsv} > spike_mutations_summary.tsv
+        
+        ### datamash -H transpose < spike_mutations_summary_temp.tsv > spike_mutations_summary.tsv
+        ### might need to make datamash it's own task
 
     >>>
 
     output {
         File spike_summary = "spike_mutations_summary.tsv"
+        File spike_dashboard = "spike_mutations_dashboard.tsv"
     }
 
     runtime {
@@ -353,10 +386,11 @@ task transfer_outputs {
         Array[File] sorted_vcf
         Array[File] sample_spike_vcf
         Array[File] sample_spike_tsv
-        Array[File] sample_spike_tsv_reformatted
         Array[File] sample_spike_tsv_summary
+        Array[File] sample_spike_tsv_dash
         File merged_vcf
         File spike_summary
+        File spike_dashboard
         File spike_mutations
         String out_dir
         
@@ -370,9 +404,10 @@ task transfer_outputs {
         gsutil -m cp ~{sep=' ' sorted_vcf} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{sep=' ' sample_spike_vcf} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{sep=' ' sample_spike_tsv} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_tsv_reformatted} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{sep=' ' sample_spike_tsv_summary} ~{outdir}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv_dash} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{spike_summary} ~{outdir}/waste_water_variant_calling/
+        gsutil -m cp ~{spike_dashboard} ~{outdir}/waste_water_variant_calling/
         gsutil -m cp ~{merged_vcf} ~{outdir}/waste_water_variant_calling/
         gsutil -m cp ~{spike_mutations} ~{outdir}/waste_water_variant_calling/
         

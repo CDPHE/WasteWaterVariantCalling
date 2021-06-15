@@ -10,7 +10,7 @@ inputs needed: Array[File] of coordinate sorted bams to be analyzed, Array[File]
 1. performs variant calling and variant filtration using bcftools
 2. merges variant calls into a single multi-sample vcf using bcftools
 3. uses bcftools view to pull out VOC/VUI-associated spike mutations
-4. generates a summary tsv of spike mutations for all samples
+4. generates a summary tsv of spike mutations for all samples in both wide and long formats
 5. transfers outputs to the user's chosen google bucket location
 
 citation for bcftools:
