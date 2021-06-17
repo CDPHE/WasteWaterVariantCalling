@@ -18,6 +18,12 @@ Twelve years of SAMtools and BCFtools
 Petr Danecek, James K Bonfield, Jennifer Liddle, John Marshall, Valeriu Ohan, Martin O Pollard, Andrew Whitwham, Thomas Keane, Shane A McCarthy, Robert M Davies, Heng Li
 GigaScience, Volume 10, Issue 2, February 2021, giab008, https://doi.org/10.1093/gigascience/giab008
 
+citation for freebayes:
+Garrison E, Marth G. Haplotype-based variant detection from short-read sequencing. arXiv preprint arXiv:1207.3907 [q-bio.GN] 2012
+
 Docker images used:
 bcftools: quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0
+samtools: staphb/samtools:1.10
 Theiagen general utilities: theiagen/utility:1.0
+Datamash: rapatsky/debian
+Freebayes: wgspipeline/freebayes:v0.0.1

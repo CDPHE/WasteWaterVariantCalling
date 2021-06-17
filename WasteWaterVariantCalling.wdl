@@ -48,34 +48,27 @@ workflow WasteWaterVariantCalling {
                 spike_annotations = spike_annotations
         }
     }
-    call merge_tsv {
+    call dashboard_tsv {
         input:
             tsv = reformat_tsv.sample_spike_tsv_summary,
             tsv_dash = reformat_tsv.sample_spike_tsv_dash,
             spike_annotations = spike_annotations
     }
-    
-    call merge_vcfs {
+    call summary_tsv {
         input:
-            vcfs = sort_vcf.sorted_vcf       
+            tsv = dashboard_tsv.spike_summary_temp
     }
-    call get_spike {
-       input:
-           vcf = merge_vcfs.merged_vcf,
-           bed = spike_bed
-    }
+
     call transfer_outputs {
         input:
             variants = variant_calling.vcf,
             sorted_vcf = sort_vcf.sorted_vcf,
-            merged_vcf = merge_vcfs.merged_vcf,
-            spike_mutations = get_spike.spike_mutations,
             sample_spike_vcf = sample_spike.sample_spike_vcf,
             sample_spike_tsv = vcf2tsv.sample_spike_tsv,
             sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary,
             sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash,
-            spike_summary = merge_tsv.spike_summary,
-            spike_dashboard = merge_tsv.spike_dashboard,
+            spike_summary = summary_tsv.spike_summary,
+            spike_dashboard = dashboard_tsv.spike_dashboard,
             out_dir = out_dir
     }
     
@@ -87,10 +80,9 @@ workflow WasteWaterVariantCalling {
         Array[File] sample_spike_tsv = vcf2tsv.sample_spike_tsv
         Array[File] sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary
         Array[File] sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash
-        File merged_vcf = merge_vcfs.merged_vcf
-        File spike_summary = merge_tsv.spike_summary
-        File spike_dashboard = merge_tsv.spike_dashboard
-        File spike_mutations = get_spike.spike_mutations
+        File spike_summary_temp = dashboard_tsv.spike_summary_temp
+        File spike_summary = summary_tsv.spike_summary
+        File spike_dashboard = dashboard_tsv.spike_dashboard
         String transfer_date = transfer_outputs.transfer_date
     }
 }
@@ -139,8 +131,8 @@ task variant_calling {
 
     runtime {
         docker: "wgspipeline/freebayes:v0.0.1"
-        memory: "16 GB"
-        cpu: 4
+        memory: "32 GB"
+        cpu: 8
         disks: "local-disk 100 SSD"
     }
 }
@@ -240,38 +232,47 @@ task reformat_tsv {
 
     command <<<
     
+        # add headers to tsv
         echo -e "CHROM\tPOS\tREF\t~{sample_id}_ALT\t~{sample_id}_DP\t~{sample_id}_RO\t~{sample_id}_AO" | cat - ~{tsv} > ~{sample_id}_spike_mutations_headers.tsv    
         
+        # create key of unique locations
         cat ~{spike_bed}  | cut -f 1,2 | tr "\t" "_" | sort | uniq > keys.txt
         
+        # use key to fill in missing values
         sed 's/\t/_/' "~{sample_id}_spike_mutations_headers.tsv" | sort -t $'\t' -k1,1 > "~{sample_id}_spike_mutations_headers_temp.tsv"
         
+        # get filled columns we want
         join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "2.3,2.6,2.4" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
         
+        # use AO and DP fields to calculate ALT allele frequency
         awk '{$4 = $2 / $3}1' ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_temp3.tsv
         
+        # add a column containing the sample ids
         awk 'NF=NF+1{$NF="~{sample_id}"}1'  ~{sample_id}_spike_mutations_temp3.tsv >  ~{sample_id}_spike_mutations_temp4.tsv
         
+        # fix the column headers
         echo -e "~{sample_id}_ALT ~{sample_id}_AO ~{sample_id}_DP ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp4.tsv > ~{sample_id}_spike_mutations_temp5.tsv
         
+        # convert from space to tab delimited
         sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp5.tsv > ~{sample_id}_spike_mutations_temp6.tsv
         
+        # change -nan allele frequencies to NA
         awk '$4 == "-nan" {$4="NA"} 1' OFS="\t" ~{sample_id}_spike_mutations_temp6.tsv > ~{sample_id}_spike_mutations_temp7.tsv
         
+        # cut the columns we want for the results summary and make output file
         cut -f1,4 ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
         
+        # cut the columns we want for the dashboard summary
         awk '{print $5 "\t" $1 "\t" $4}' ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_temp8.tsv
         
+        # add annotations to the dashboard summary
         paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp8.tsv > ~{sample_id}_spike_mutations_temp9.tsv
         
+        # reorder the dashboard summuary columns
         awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' ~{sample_id}_spike_mutations_temp9.tsv > ~{sample_id}_spike_mutations_temp10.tsv
         
+        #fix the dashboard summary column headers and make output file
         awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' ~{sample_id}_spike_mutations_temp10.tsv > ~{sample_id}_spike_mutations_fordash.tsv
-        
-        ### change counts to alt frequency - done
-        ### For epis, need to add a column with sample name all the way down - done
-        ### transpose tables for bioinf
-        ### cat the long way for epis - done
     
     >>>
 
@@ -288,7 +289,7 @@ task reformat_tsv {
     }
 }
 
-task merge_tsv {
+task dashboard_tsv {
     input {
         Array[File] tsv
         Array[File] tsv_dash
@@ -297,11 +298,14 @@ task merge_tsv {
 
     command <<<
         
+        # concatenate the tsvs and make the dashboard summary output and make output
         awk 'FNR==1 && NR!=1{next;}{print}' ~{sep=' ' tsv_dash} >> spike_mutations_dashboard.tsv
-        ### echo -e "sample_id\tAA_change\tNucl_change\tLineages\tALT\tALTfreq" | cat - spike_mutations_dashboard_temp.tsv > spike_mutations_dashboard.tsv
         
+        # fix delimiters in annotations file
         sed 's/ /\t/g' ~{spike_annotations} > spike_annotations.tsv
-        paste spike_annotations.tsv ~{sep=' ' tsv} > spike_mutations_summary.tsv
+        
+        # concatentate tsvs for sequencing and bioinformatics team summary file and make output
+        paste spike_annotations.tsv ~{sep=' ' tsv} > spike_mutations_summary_temp.tsv
         
         ### datamash -H transpose < spike_mutations_summary_temp.tsv > spike_mutations_summary.tsv
         ### might need to make datamash it's own task
@@ -309,7 +313,7 @@ task merge_tsv {
     >>>
 
     output {
-        File spike_summary = "spike_mutations_summary.tsv"
+        File spike_summary_temp = "spike_mutations_summary_temp.tsv"
         File spike_dashboard = "spike_mutations_dashboard.tsv"
     }
 
@@ -321,59 +325,24 @@ task merge_tsv {
     }
 }
 
-task merge_vcfs {
+task summary_tsv {
     input {
-        Array[File] vcfs
+        File tsv
     }
 
     command <<<
         
-        # copy files to CWD (required for tabix indexing)
-        INFILES=~{write_lines(vcfs)}
-        ln -s $(cat $INFILES) .
-        for FN in $(cat $INFILES); do basename $FN; done > vcf_filenames.txt
-
-        # tabix index input vcfs (must be gzipped)
-        for FN in $(cat vcf_filenames.txt); do
-            tabix -p vcf $FN
-        done
-        
-        bcftools merge --missing-to-ref --force-samples --merge snps --output-type z --output merged_variants.vcf.gz --file-list vcf_filenames.txt
+        # datamash to tranpose results summary
+        datamash -H transpose < ~{tsv} > spike_mutations_summary.tsv
 
     >>>
 
     output {
-        File merged_vcf = "merged_variants.vcf.gz"
+        File spike_summary = "spike_mutations_summary.tsv"
     }
 
     runtime {
-        docker: "quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0"
-        memory: "16 GB"
-        cpu: 4
-        disks: "local-disk 100 SSD"
-    }
-}
-
-task get_spike {
-    input {
-        File vcf
-        File bed
-    }
-
-    command <<<
-        
-        tabix -p vcf ~{vcf}
-        
-        bcftools view --regions-file ~{bed} --output-type v --output-file spike_mutations.vcf ~{vcf}
-        
-    >>>
-
-    output {
-         File spike_mutations = "spike_mutations.vcf"
-    }
-
-    runtime {
-        docker: "quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0"
+        docker: "rapatsky/debian"
         memory: "16 GB"
         cpu: 4
         disks: "local-disk 100 SSD"
@@ -388,10 +357,8 @@ task transfer_outputs {
         Array[File] sample_spike_tsv
         Array[File] sample_spike_tsv_summary
         Array[File] sample_spike_tsv_dash
-        File merged_vcf
         File spike_summary
         File spike_dashboard
-        File spike_mutations
         String out_dir
         
     }
@@ -408,8 +375,6 @@ task transfer_outputs {
         gsutil -m cp ~{sep=' ' sample_spike_tsv_dash} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{spike_summary} ~{outdir}/waste_water_variant_calling/
         gsutil -m cp ~{spike_dashboard} ~{outdir}/waste_water_variant_calling/
-        gsutil -m cp ~{merged_vcf} ~{outdir}/waste_water_variant_calling/
-        gsutil -m cp ~{spike_mutations} ~{outdir}/waste_water_variant_calling/
         
         transferdate=`date`
         echo $transferdate | tee TRANSFERDATE
