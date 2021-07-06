@@ -7,11 +7,10 @@ Takes as input an Array[File] of coordinate sorted bams from the following workf
 
 inputs needed: Array[File] of coordinate sorted bams to be analyzed, Array[File] of sample ids, fasta reference genome for SARS-CoV-2 saved as workspace data, a bed file containing mutations of interest (Spike VOC and VUI mutations) saved as workpace data, the google bucket path to where outputs should be transferred (written as a String in double quotes
 
-1. performs variant calling and variant filtration using bcftools
-2. merges variant calls into a single multi-sample vcf using bcftools
-3. uses bcftools view to pull out VOC/VUI-associated spike mutations
-4. generates a summary tsv of spike mutations for all samples in both wide and long formats
-5. transfers outputs to the user's chosen google bucket location
+1. performs variant calling and variant filtration using Freebayes
+2. uses bcftools view to pull out VOC/VUI-associated spike mutations
+3. generates a summary tsv of spike mutations for all samples in both wide and long formats
+4. transfers outputs to the user's chosen google bucket location
 
 citation for bcftools:
 Twelve years of SAMtools and BCFtools

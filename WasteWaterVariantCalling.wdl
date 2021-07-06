@@ -121,7 +121,7 @@ task variant_calling {
 
     command <<<
         
-        freebayes -f ~{ref} --haplotype-length 0 --min-alternate-count 3 --min-alternate-fraction 0.05 --min-mapping-quality 20 --min-base-quality 20 --min-coverage 10 --use-duplicate-reads --report-monomorphic --pooled-continuous -n 1 ~{bam} > ~{sample_id}_variants.vcf
+        freebayes -f ~{ref} --haplotype-length 0 --min-alternate-count 3 --min-alternate-fraction 0.05 --min-mapping-quality 20 --min-base-quality 20 --min-coverage 10 --use-duplicate-reads --report-monomorphic --pooled-continuous ~{bam} > ~{sample_id}_variants.vcf
         
     >>>
 
@@ -133,7 +133,7 @@ task variant_calling {
         docker: "wgspipeline/freebayes:v0.0.1"
         memory: "32 GB"
         cpu: 8
-        disks: "local-disk 100 SSD"
+        disks: "local-disk 200 SSD"
     }
 }
 
@@ -241,38 +241,66 @@ task reformat_tsv {
         # use key to fill in missing values
         sed 's/\t/_/' "~{sample_id}_spike_mutations_headers.tsv" | sort -t $'\t' -k1,1 > "~{sample_id}_spike_mutations_headers_temp.tsv"
         
-        # get filled columns we want
-        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "2.3,2.6,2.4" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
+        # get the filled columns we want
+        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "1.1,2.3,2.4,2.6" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
+        
+        # separate the comma separated alleles into separate rows
+        
+        awk 'BEGIN { OFS="\t" }
+            { $1=$1;t=$0; }
+            { while(index($0,",")) {
+                gsub(/,[[:alnum:],]*/,""); print;
+                $0=t; gsub(OFS "[[:alnum:]]*,",OFS); t=$0;
+              }
+              print t
+            }' ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_temp3.tsv
         
         # use AO and DP fields to calculate ALT allele frequency
-        awk '{$4 = $2 / $3}1' ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_temp3.tsv
+        awk '{$5 = $4 / $3}1' ~{sample_id}_spike_mutations_temp3.tsv > ~{sample_id}_spike_mutations_temp4.tsv
         
-        # add a column containing the sample ids
-        awk 'NF=NF+1{$NF="~{sample_id}"}1'  ~{sample_id}_spike_mutations_temp3.tsv >  ~{sample_id}_spike_mutations_temp4.tsv
+        # fix delimiters
         
-        # fix the column headers
-        echo -e "~{sample_id}_ALT ~{sample_id}_AO ~{sample_id}_DP ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp4.tsv > ~{sample_id}_spike_mutations_temp5.tsv
-        
-        # convert from space to tab delimited
-        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp5.tsv > ~{sample_id}_spike_mutations_temp6.tsv
+        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp4.tsv > ~{sample_id}_spike_mutations_temp5.tsv
         
         # change -nan allele frequencies to NA
-        awk '$4 == "-nan" {$4="NA"} 1' OFS="\t" ~{sample_id}_spike_mutations_temp6.tsv > ~{sample_id}_spike_mutations_temp7.tsv
+        awk '$5 == "-nan" {$5="NA"} 1' OFS="\t" ~{sample_id}_spike_mutations_temp5.tsv > ~{sample_id}_spike_mutations_temp6.tsv
+        
+        # combine the rows based on matching nucl location and ; separate the values and then fix delimiters
+        
+        awk '{f2[$1]=f2[$1] sep[$1] $2; 
+              f3[$1]=f3[$1] sep[$1] $3;
+              f4[$1]=f4[$1] sep[$1] $4;
+              f5[$1]=f5[$1] sep[$1] $5; 
+              sep[$1]=";"}
+         END {for(k in f2) print k,f2[k],f3[k],f4[k],f5[k]}' ~{sample_id}_spike_mutations_temp6.tsv > ~{sample_id}_spike_mutations_temp7.tsv
+         
+        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_temp8.tsv
+        
+        # add a column containing the sample ids
+        awk 'NF=NF+1{$NF="~{sample_id}"}1'  ~{sample_id}_spike_mutations_temp8.tsv >  ~{sample_id}_spike_mutations_temp9.tsv
+        
+        # fix the column headers
+        echo -e "CHROMPOS ~{sample_id}_ALT ~{sample_id}_DP ~{sample_id}_AO ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp9.tsv > ~{sample_id}_spike_mutations_temp10.tsv
+        
+        # convert from space to tab delimited and then sort by col1
+        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp10.tsv > ~{sample_id}_spike_mutations_temp11.tsv
+        
+        sort -t $'\t' -k 1,1 -V ~{sample_id}_spike_mutations_temp11.tsv > ~{sample_id}_spike_mutations_temp12.tsv
         
         # cut the columns we want for the results summary and make output file
-        cut -f1,4 ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
+        cut -f2,5 ~{sample_id}_spike_mutations_temp12.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
         
         # cut the columns we want for the dashboard summary
-        awk '{print $5 "\t" $1 "\t" $4}' ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_temp8.tsv
+        awk '{print $6 "\t" $2 "\t" $5}' ~{sample_id}_spike_mutations_temp12.tsv > ~{sample_id}_spike_mutations_temp13.tsv
         
         # add annotations to the dashboard summary
-        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp8.tsv > ~{sample_id}_spike_mutations_temp9.tsv
+        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp13.tsv > ~{sample_id}_spike_mutations_temp14.tsv
         
-        # reorder the dashboard summuary columns
-        awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' ~{sample_id}_spike_mutations_temp9.tsv > ~{sample_id}_spike_mutations_temp10.tsv
+        # reorder the dashboard summary columns
+        awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' ~{sample_id}_spike_mutations_temp14.tsv > ~{sample_id}_spike_mutations_temp15.tsv
         
         #fix the dashboard summary column headers and make output file
-        awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' ~{sample_id}_spike_mutations_temp10.tsv > ~{sample_id}_spike_mutations_fordash.tsv
+        awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' ~{sample_id}_spike_mutations_temp15.tsv > ~{sample_id}_spike_mutations_fordash.tsv
     
     >>>
 
@@ -285,7 +313,7 @@ task reformat_tsv {
         docker: "theiagen/utility:1.0"
         memory: "16 GB"
         cpu: 4
-        disks: "local-disk 100 SSD"
+        disks: "local-disk 500 SSD"
     }
 }
 
@@ -298,7 +326,7 @@ task dashboard_tsv {
 
     command <<<
         
-        # concatenate the tsvs and make the dashboard summary output and make output
+        # concatenate the tsvs and make the dashboard summary output
         awk 'FNR==1 && NR!=1{next;}{print}' ~{sep=' ' tsv_dash} >> spike_mutations_dashboard.tsv
         
         # fix delimiters in annotations file
@@ -306,9 +334,6 @@ task dashboard_tsv {
         
         # concatentate tsvs for sequencing and bioinformatics team summary file and make output
         paste spike_annotations.tsv ~{sep=' ' tsv} > spike_mutations_summary_temp.tsv
-        
-        ### datamash -H transpose < spike_mutations_summary_temp.tsv > spike_mutations_summary.tsv
-        ### might need to make datamash it's own task
 
     >>>
 
