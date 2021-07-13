@@ -40,18 +40,34 @@ workflow WasteWaterVariantCalling {
                 sample_id = id_bam.left,
                 bed = spike_bed
         }
-        call reformat_tsv {
+        call fill_NA {
             input:
                 tsv = vcf2tsv.sample_spike_tsv,
                 sample_id = id_bam.left,
-                spike_bed = spike_bed,
+                spike_bed = spike_bed
+        }
+        call allele_freq {
+            input:
+                tsv = fill_NA.fill_NA_tsv,
+                sample_id = id_bam.left
+        }
+        call reformat_tsv {
+            input:
+                tsv = allele_freq.allele_freq_tsv,
+                sample_id = id_bam.left
+        }
+        call summary_prep {
+            input:
+                tsv = reformat_tsv.reformat_tsv_tsv,
+                sample_id = id_bam.left,
                 spike_annotations = spike_annotations
         }
     }
     call dashboard_tsv {
         input:
-            tsv = reformat_tsv.sample_spike_tsv_summary,
-            tsv_dash = reformat_tsv.sample_spike_tsv_dash,
+            tsv = summary_prep.sample_spike_tsv_summary,
+            tsv_dash = summary_prep.sample_spike_tsv_dash,
+            tsv_counts = summary_prep.sample_spike_tsv_counts,
             spike_annotations = spike_annotations
     }
     call summary_tsv {
@@ -65,10 +81,12 @@ workflow WasteWaterVariantCalling {
             sorted_vcf = sort_vcf.sorted_vcf,
             sample_spike_vcf = sample_spike.sample_spike_vcf,
             sample_spike_tsv = vcf2tsv.sample_spike_tsv,
-            sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary,
-            sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash,
+            sample_spike_tsv_summary = summary_prep.sample_spike_tsv_summary,
+            sample_spike_tsv_dash = summary_prep.sample_spike_tsv_dash,
+            sample_spike_tsv_counts = summary_prep.sample_spike_tsv_counts,
             spike_summary = summary_tsv.spike_summary,
             spike_dashboard = dashboard_tsv.spike_dashboard,
+            spike_counts = dashboard_tsv.spike_counts,
             out_dir = out_dir
     }
     
@@ -78,12 +96,18 @@ workflow WasteWaterVariantCalling {
         Array[File] sorted_vcf = sort_vcf.sorted_vcf
         Array[File] sample_spike_vcf = sample_spike.sample_spike_vcf
         Array[File] sample_spike_tsv = vcf2tsv.sample_spike_tsv
-        Array[File] sample_spike_tsv_summary = reformat_tsv.sample_spike_tsv_summary
-        Array[File] sample_spike_tsv_dash = reformat_tsv.sample_spike_tsv_dash
+        Array[File] sample_spike_tsv_summary = summary_prep.sample_spike_tsv_summary
+        Array[File] sample_spike_tsv_dash = summary_prep.sample_spike_tsv_dash
+        Array[File] fill_NA_tsv = fill_NA.fill_NA_tsv
+        Array[File] allele_freq_tsv = allele_freq.allele_freq_tsv
+        Array[File] reformat_tsv_tsv = reformat_tsv.reformat_tsv_tsv
+        Array[File] sample_spike_tsv_counts = summary_prep.sample_spike_tsv_counts
         File spike_summary_temp = dashboard_tsv.spike_summary_temp
         File spike_summary = summary_tsv.spike_summary
         File spike_dashboard = dashboard_tsv.spike_dashboard
+        File spike_counts = dashboard_tsv.spike_counts
         String transfer_date = transfer_outputs.transfer_date
+        
     }
 }
 
@@ -222,98 +246,140 @@ task vcf2tsv {
     }
 }
 
-task reformat_tsv {
+task fill_NA {
     input {
         File tsv
         String sample_id
         File spike_bed
-        File spike_annotations
     }
 
-    command <<<
-    
-        # add headers to tsv
-        echo -e "CHROM\tPOS\tREF\t~{sample_id}_ALT\t~{sample_id}_DP\t~{sample_id}_RO\t~{sample_id}_AO" | cat - ~{tsv} > ~{sample_id}_spike_mutations_headers.tsv    
+    command <<<    
         
         # create key of unique locations
-        cat ~{spike_bed}  | cut -f 1,2 | tr "\t" "_" | sort | uniq > keys.txt
+        cat ~{spike_bed} | cut -f 1,2 | tr "\t" "_" | sort | uniq > keys.txt
         
-        # use key to fill in missing values
-        sed 's/\t/_/' "~{sample_id}_spike_mutations_headers.tsv" | sort -t $'\t' -k1,1 > "~{sample_id}_spike_mutations_headers_temp.tsv"
+        # add headers to tsv and use key to fill in missing values
+        echo -e "CHROM\tPOS\tREF\t~{sample_id}_ALT\t~{sample_id}_DP\t~{sample_id}_RO\t~{sample_id}_AO" | cat - ~{tsv} | sed 's/\t/_/' | sort -t $'\t' -k1,1 > ~{sample_id}_spike_mutations_temp1.tsv
         
         # get the filled columns we want
-        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "1.1,2.3,2.4,2.6" keys.txt "~{sample_id}_spike_mutations_headers_temp.tsv" > "~{sample_id}_spike_mutations_temp2.tsv"
+        join -t $'\t' -e NA -a 1 -1 1 -2 1 -o "1.1,2.3,2.4,2.6" keys.txt "~{sample_id}_spike_mutations_temp1.tsv" > ~{sample_id}_spike_fill_NA.tsv
+            
+    >>>
+
+    output {
+         File fill_NA_tsv = "${sample_id}_spike_fill_NA.tsv"
+    }
+
+    runtime {
+        docker: "theiagen/utility:1.0"
+        memory: "32 GB"
+        cpu: 8
+        disks: "local-disk 2500 HDD"
+    }
+}
+
+task allele_freq {
+    input {
+        File tsv
+        String sample_id
+    }
+
+    command <<<    
         
-        # separate the comma separated alleles into separate rows
+        # separate the comma separated alleles into separate rows (might need to fix delimiters)
+        awk '{split($2,a,","); split($4,b,","); for(i in a){print $1,a[i],$3,b[i]}}' ~{tsv} > ~{sample_id}_spike_mutations_temp2.tsv
         
-        awk 'BEGIN { OFS="\t" }
-            { $1=$1;t=$0; }
-            { while(index($0,",")) {
-                gsub(/,[[:alnum:],]*/,""); print;
-                $0=t; gsub(OFS "[[:alnum:]]*,",OFS); t=$0;
-              }
-              print t
-            }' ~{sample_id}_spike_mutations_temp2.tsv > ~{sample_id}_spike_mutations_temp3.tsv
-        
-        # use AO and DP fields to calculate ALT allele frequency
-        awk '{$5 = $4 / $3}1' ~{sample_id}_spike_mutations_temp3.tsv > ~{sample_id}_spike_mutations_temp4.tsv
-        
-        # fix delimiters
-        
-        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp4.tsv > ~{sample_id}_spike_mutations_temp5.tsv
-        
-        # change -nan allele frequencies to NA
-        awk '$5 == "-nan" {$5="NA"} 1' OFS="\t" ~{sample_id}_spike_mutations_temp5.tsv > ~{sample_id}_spike_mutations_temp6.tsv
-        
-        # combine the rows based on matching nucl location and ; separate the values and then fix delimiters
+        # use AO and DP fields to calculate ALT allele frequency, fix delimiters, change -nan allele frequencies to NA
+        awk '$3~"^NA"||$4~"^NA"{$5="NA";print;next}{$5=$4/$3}1' ~{sample_id}_spike_mutations_temp2.tsv | sed 's/ /\t/g' | awk '$5 == "-nan" {$5="NA"} 1' OFS="\t" > ~{sample_id}_spike_allele_freq.tsv
+    
+    >>>
+
+    output {
+         File allele_freq_tsv = "${sample_id}_spike_allele_freq.tsv"
+    }
+
+    runtime {
+        docker: "theiagen/utility:1.0"
+        memory: "32 GB"
+        cpu: 8
+        disks: "local-disk 2500 HDD"
+    }
+}
+
+task reformat_tsv {
+    input {
+        File tsv
+        String sample_id
+    }
+
+    command <<<    
+
+        # combine the rows based on matching nucl location
         
         awk '{f2[$1]=f2[$1] sep[$1] $2; 
               f3[$1]=f3[$1] sep[$1] $3;
               f4[$1]=f4[$1] sep[$1] $4;
               f5[$1]=f5[$1] sep[$1] $5; 
               sep[$1]=";"}
-         END {for(k in f2) print k,f2[k],f3[k],f4[k],f5[k]}' ~{sample_id}_spike_mutations_temp6.tsv > ~{sample_id}_spike_mutations_temp7.tsv
+         END {for(k in f2) print k,f2[k],f3[k],f4[k],f5[k]}' ~{tsv} > ~{sample_id}_spike_mutations_temp3.tsv
          
-        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp7.tsv > ~{sample_id}_spike_mutations_temp8.tsv
+        # fix delimiters, add a column containing the sample ids
+        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp3.tsv | awk 'NF=NF+1{$NF="~{sample_id}"}1' > ~{sample_id}_spike_mutations_temp4.tsv
         
-        # add a column containing the sample ids
-        awk 'NF=NF+1{$NF="~{sample_id}"}1'  ~{sample_id}_spike_mutations_temp8.tsv >  ~{sample_id}_spike_mutations_temp9.tsv
+        # fix the column headers, convert from space to tab delimited and then sort by col1
+        echo -e "CHROMPOS ~{sample_id}_ALT ~{sample_id}_DP ~{sample_id}_AO ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp4.tsv | sed 's/ /\t/g' | sort -t $'\t' -k 1,1 -V > ~{sample_id}_spike_reformat.tsv
         
-        # fix the column headers
-        echo -e "CHROMPOS ~{sample_id}_ALT ~{sample_id}_DP ~{sample_id}_AO ~{sample_id}_ALTfreq sample_id" | cat - ~{sample_id}_spike_mutations_temp9.tsv > ~{sample_id}_spike_mutations_temp10.tsv
-        
-        # convert from space to tab delimited and then sort by col1
-        sed 's/ /\t/g' ~{sample_id}_spike_mutations_temp10.tsv > ~{sample_id}_spike_mutations_temp11.tsv
-        
-        sort -t $'\t' -k 1,1 -V ~{sample_id}_spike_mutations_temp11.tsv > ~{sample_id}_spike_mutations_temp12.tsv
-        
-        # cut the columns we want for the results summary and make output file
-        cut -f2,5 ~{sample_id}_spike_mutations_temp12.tsv > ~{sample_id}_spike_mutations_forsummary.tsv
-        
-        # cut the columns we want for the dashboard summary
-        awk '{print $6 "\t" $2 "\t" $5}' ~{sample_id}_spike_mutations_temp12.tsv > ~{sample_id}_spike_mutations_temp13.tsv
-        
-        # add annotations to the dashboard summary
-        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp13.tsv > ~{sample_id}_spike_mutations_temp14.tsv
-        
-        # reorder the dashboard summary columns
-        awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' ~{sample_id}_spike_mutations_temp14.tsv > ~{sample_id}_spike_mutations_temp15.tsv
-        
-        #fix the dashboard summary column headers and make output file
-        awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' ~{sample_id}_spike_mutations_temp15.tsv > ~{sample_id}_spike_mutations_fordash.tsv
-    
     >>>
 
     output {
-         File sample_spike_tsv_summary = "${sample_id}_spike_mutations_forsummary.tsv"
-         File sample_spike_tsv_dash = "${sample_id}_spike_mutations_fordash.tsv"
+         File reformat_tsv_tsv = "${sample_id}_spike_reformat.tsv"
     }
 
     runtime {
         docker: "theiagen/utility:1.0"
-        memory: "16 GB"
-        cpu: 4
-        disks: "local-disk 500 SSD"
+        memory: "32 GB"
+        cpu: 8
+        disks: "local-disk 2500 HDD"
+    }
+}
+
+task summary_prep {
+    input {
+        File tsv
+        String sample_id
+        File spike_annotations
+    }
+
+    command <<<    
+        
+        # cut the columns we want for the results summary and make output file
+        cut -f2,5 ~{tsv} > ~{sample_id}_spike_mutations_forsummary.tsv
+        
+        # cut the columns we want for the dashboard summary
+        awk '{print $6 "\t" $2 "\t" $5}' ~{tsv} > ~{sample_id}_spike_mutations_temp5.tsv
+        
+        # add annotations to the dashboard summary, reorder the dashboard summary columns, fix the dashboard summary column headers and make output file
+        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp5.tsv | awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6}' | awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "ALTfreq"} NR>1{print $1, $2, $3, $4, $5, $6}' > ~{sample_id}_spike_mutations_fordash.tsv
+    
+        # cut the columns we want for the counts summary
+        awk '{print $6 "\t" $2 "\t" $3 "\t" $4}' ~{tsv} > ~{sample_id}_spike_mutations_temp6.tsv
+        
+        # add annotations to the counts summary, reorder the dashboard summary columns, fix the dashboard summary column headers and make output file
+        paste ~{spike_annotations} ~{sample_id}_spike_mutations_temp6.tsv | awk '{print $4 "\t" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6 "\t" $7}' | awk 'BEGIN{FS=OFS="\t"; print "sample_id", "AA_change", "Nucl_change", "Lineages", "ALT", "Total_count", "ALT_count"} NR>1{print $1, $2, $3, $4, $5, $6, $7}' > ~{sample_id}_spike_mutations_counts.tsv
+   
+   >>>
+
+    output {
+         File sample_spike_tsv_summary = "${sample_id}_spike_mutations_forsummary.tsv"
+         File sample_spike_tsv_dash = "${sample_id}_spike_mutations_fordash.tsv"
+         File sample_spike_tsv_counts = "${sample_id}_spike_mutations_counts.tsv"
+    }
+
+    runtime {
+        docker: "theiagen/utility:1.0"
+        memory: "32 GB"
+        cpu: 8
+        disks: "local-disk 2500 HDD"
     }
 }
 
@@ -321,6 +387,7 @@ task dashboard_tsv {
     input {
         Array[File] tsv
         Array[File] tsv_dash
+        Array[File] tsv_counts
         File spike_annotations
     }
 
@@ -328,6 +395,9 @@ task dashboard_tsv {
         
         # concatenate the tsvs and make the dashboard summary output
         awk 'FNR==1 && NR!=1{next;}{print}' ~{sep=' ' tsv_dash} >> spike_mutations_dashboard.tsv
+        
+        # concatenate the tsvs and make the dashboard summary output
+        awk 'FNR==1 && NR!=1{next;}{print}' ~{sep=' ' tsv_counts} >> spike_mutations_counts.tsv
         
         # fix delimiters in annotations file
         sed 's/ /\t/g' ~{spike_annotations} > spike_annotations.tsv
@@ -340,13 +410,14 @@ task dashboard_tsv {
     output {
         File spike_summary_temp = "spike_mutations_summary_temp.tsv"
         File spike_dashboard = "spike_mutations_dashboard.tsv"
+        File spike_counts = "spike_mutations_counts.tsv"
     }
 
     runtime {
         docker: "theiagen/utility:1.0"
         memory: "16 GB"
         cpu: 4
-        disks: "local-disk 100 SSD"
+        disks: "local-disk 200 SSD"
     }
 }
 
@@ -370,7 +441,7 @@ task summary_tsv {
         docker: "rapatsky/debian"
         memory: "16 GB"
         cpu: 4
-        disks: "local-disk 100 SSD"
+        disks: "local-disk 200 SSD"
     }
 }
 
@@ -382,8 +453,10 @@ task transfer_outputs {
         Array[File] sample_spike_tsv
         Array[File] sample_spike_tsv_summary
         Array[File] sample_spike_tsv_dash
+        Array[File] sample_spike_tsv_counts
         File spike_summary
         File spike_dashboard
+        File spike_counts
         String out_dir
         
     }
@@ -398,8 +471,10 @@ task transfer_outputs {
         gsutil -m cp ~{sep=' ' sample_spike_tsv} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{sep=' ' sample_spike_tsv_summary} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{sep=' ' sample_spike_tsv_dash} ~{outdir}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv_counts} ~{outdir}/waste_water_variant_calling/vcfs/
         gsutil -m cp ~{spike_summary} ~{outdir}/waste_water_variant_calling/
         gsutil -m cp ~{spike_dashboard} ~{outdir}/waste_water_variant_calling/
+        gsutil -m cp ~{spike_counts} ~{outdir}/waste_water_variant_calling/
         
         transferdate=`date`
         echo $transferdate | tee TRANSFERDATE
@@ -413,6 +488,6 @@ task transfer_outputs {
         docker: "theiagen/utility:1.0"
         memory: "1 GB"
         cpu: 1
-        disks: "local-disk 10 SSD"
+        disks: "local-disk 50 SSD"
     }
 }

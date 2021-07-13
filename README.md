@@ -9,7 +9,7 @@ inputs needed: Array[File] of coordinate sorted bams to be analyzed, Array[File]
 
 1. performs variant calling and variant filtration using Freebayes
 2. uses bcftools view to pull out VOC/VUI-associated spike mutations
-3. generates a summary tsv of spike mutations for all samples in both wide and long formats
+3. generates a summary tsv of the allele frequencies of spike mutations in the bam files for all samples in both wide and long formats, and a long format summary of the depth of coverage for spike mutations
 4. transfers outputs to the user's chosen google bucket location
 
 citation for bcftools:
