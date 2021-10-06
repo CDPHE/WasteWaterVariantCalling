@@ -5,7 +5,7 @@
 Performs variant calling on SARS-CoV-2 in waster water samples and identifies mutations in the Spike gene associated with known VOCs and VUIs on the Google Cloud Terra Platform.
 Takes as input an Array[File] of coordinate sorted bams from the following workflows: illumina-preprocessing-assembly (for paired-end illumina data), nanopore-preprocessing-assembly (for nanopore data), and COVIDSeqSEassembly (for single-end sequencing using the COVIDSeq protocol).
 
-inputs needed: Array[File] of coordinate sorted bams to be analyzed, Array[File] of sample ids, fasta reference genome for SARS-CoV-2 saved as workspace data, a bed file containing mutations of interest (Spike VOC and VUI mutations) saved as workpace data, the google bucket path to where outputs should be transferred (written as a String in double quotes
+inputs needed: Array[File] of coordinate sorted bams to be analyzed, Array[File] of sample ids, fasta reference genome for SARS-CoV-2 saved as workspace data, a bed file containing 1-based reference positions for mutations of interest (Spike VOC and VUI mutations) saved as workpace data, a 3-column tsv with annotations for them muations of interest (AA_change, Nucl_change, Lineage), the google bucket path to where outputs should be transferred (written as a String in double quotes)
 
 1. performs variant calling and variant filtration using Freebayes
 2. uses bcftools view to pull out VOC/VUI-associated spike mutations
