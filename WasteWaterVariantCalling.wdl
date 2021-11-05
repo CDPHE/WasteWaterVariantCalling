@@ -8,7 +8,7 @@ workflow WasteWaterVariantCalling {
         File spike_bed
         File spike_annotations
         Array[String] sample_id
-        Array[String] out_dir
+        String out_dir
     }
 
     scatter (id_bam in zip(sample_id, sorted_bam)) {
@@ -457,12 +457,11 @@ task transfer_outputs {
         File spike_summary
         File spike_dashboard
         File spike_counts
-        Array[String] out_dir
+        String out_dir
         
     }
     
-    String outdir = '${out_dir[0]}'
-    String outdirpath = sub(outdir, "/$", "")
+    String outdirpath = sub(out_dir, "/$", "")
 
     command <<<
         
