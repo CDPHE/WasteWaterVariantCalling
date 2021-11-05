@@ -8,7 +8,7 @@ workflow WasteWaterVariantCalling {
         File spike_bed
         File spike_annotations
         Array[String] sample_id
-        String out_dir
+        Array[String] out_dir
     }
 
     scatter (id_bam in zip(sample_id, sorted_bam)) {
@@ -457,24 +457,25 @@ task transfer_outputs {
         File spike_summary
         File spike_dashboard
         File spike_counts
-        String out_dir
+        Array[String] out_dir
         
     }
     
-    String outdir = sub(out_dir, "/$", "")
+    String outdir = '${out_dir[0]}'
+    String outdirpath = sub(outdir, "/$", "")
 
     command <<<
         
-        gsutil -m cp ~{sep=' ' variants} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sorted_vcf} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_vcf} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_tsv} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_tsv_summary} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_tsv_dash} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{sep=' ' sample_spike_tsv_counts} ~{outdir}/waste_water_variant_calling/vcfs/
-        gsutil -m cp ~{spike_summary} ~{outdir}/waste_water_variant_calling/
-        gsutil -m cp ~{spike_dashboard} ~{outdir}/waste_water_variant_calling/
-        gsutil -m cp ~{spike_counts} ~{outdir}/waste_water_variant_calling/
+        gsutil -m cp ~{sep=' ' variants} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sorted_vcf} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_vcf} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv_summary} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv_dash} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{sep=' ' sample_spike_tsv_counts} ~{outdirpath}/waste_water_variant_calling/vcfs/
+        gsutil -m cp ~{spike_summary} ~{outdirpath}/waste_water_variant_calling/
+        gsutil -m cp ~{spike_dashboard} ~{outdirpath}/waste_water_variant_calling/
+        gsutil -m cp ~{spike_counts} ~{outdirpath}/waste_water_variant_calling/
         
         transferdate=`date`
         echo $transferdate | tee TRANSFERDATE
