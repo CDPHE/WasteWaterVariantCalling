@@ -128,7 +128,7 @@ task add_RG {
     }
 
     runtime {
-        docker: "staphb/samtools:1.14"
+        docker: "staphb/samtools:1.10"
         memory: "8 GB"
         cpu: 2
         disks: "local-disk 100 SSD"
@@ -183,7 +183,7 @@ task sort_vcf {
     }
 
     runtime {
-        docker: "quay.io/biocontainers/bcftools:1.14--h88f3f91_0"
+        docker: "quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0"
         memory: "8 GB"
         cpu: 2
         disks: "local-disk 100 SSD"
@@ -210,7 +210,7 @@ task sample_spike {
     }
 
     runtime {
-        docker: "quay.io/biocontainers/bcftools:1.14--h88f3f91_0"
+        docker: "quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0"
         memory: "16 GB"
         cpu: 4
         disks: "local-disk 100 SSD"
@@ -239,7 +239,7 @@ task vcf2tsv {
     }
 
     runtime {
-        docker: "quay.io/biocontainers/bcftools:1.14--h88f3f91_0"
+        docker: "quay.io/biocontainers/bcftools:1.10.2--hd2cd319_0"
         memory: "16 GB"
         cpu: 4
         disks: "local-disk 100 SSD"
@@ -271,7 +271,7 @@ task fill_NA {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "32 GB"
         cpu: 8
         disks: "local-disk 2500 HDD"
@@ -299,7 +299,7 @@ task allele_freq {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "32 GB"
         cpu: 8
         disks: "local-disk 2500 HDD"
@@ -336,7 +336,7 @@ task reformat_tsv {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "32 GB"
         cpu: 8
         disks: "local-disk 2500 HDD"
@@ -376,7 +376,7 @@ task summary_prep {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "32 GB"
         cpu: 8
         disks: "local-disk 2500 HDD"
@@ -414,7 +414,7 @@ task dashboard_tsv {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "16 GB"
         cpu: 4
         disks: "local-disk 200 SSD"
@@ -460,7 +460,7 @@ task transfer_outputs {
         String out_dir
         
     }
-    
+
     String outdirpath = sub(out_dir, "/$", "")
 
     command <<<
@@ -485,7 +485,7 @@ task transfer_outputs {
     }
 
     runtime {
-        docker: "theiagen/utility:1.1"
+        docker: "theiagen/utility:1.0"
         memory: "1 GB"
         cpu: 1
         disks: "local-disk 50 SSD"
