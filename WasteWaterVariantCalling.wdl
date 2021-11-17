@@ -36,7 +36,7 @@ workflow WasteWaterVariantCalling {
         }
         call vcf2tsv {
             input:
-                vcf = sample_voc.sample_voc_vcf,
+                vcf = sample_VOCs.sample_voc_vcf,
                 sample_id = id_bam.left,
                 bed = voc_bed
         }
@@ -79,7 +79,7 @@ workflow WasteWaterVariantCalling {
         input:
             variants = variant_calling.vcf,
             sorted_vcf = sort_vcf.sorted_vcf,
-            sample_voc_vcf = sample_voc.sample_voc_vcf,
+            sample_voc_vcf = sample_VOCs.sample_voc_vcf,
             sample_voc_tsv = vcf2tsv.sample_voc_tsv,
             sample_voc_tsv_summary = summary_prep.sample_voc_tsv_summary,
             sample_voc_tsv_dash = summary_prep.sample_voc_tsv_dash,
@@ -94,7 +94,7 @@ workflow WasteWaterVariantCalling {
         Array[File] addrg_bam = add_RG.rgbam
         Array[File] variants = variant_calling.vcf
         Array[File] sorted_vcf = sort_vcf.sorted_vcf
-        Array[File] sample_voc_vcf = sample_voc.sample_voc_vcf
+        Array[File] sample_voc_vcf = sample_VOCs.sample_voc_vcf
         Array[File] sample_voc_tsv = vcf2tsv.sample_voc_tsv
         Array[File] sample_voc_tsv_summary = summary_prep.sample_voc_tsv_summary
         Array[File] sample_voc_tsv_dash = summary_prep.sample_voc_tsv_dash
